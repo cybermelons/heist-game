@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heist</title>
+<style>
+  html,body { margin:0; height:100%; background:#1a1a22; overflow:hidden;
+              font-family:ui-monospace,monospace; color:#e8e8f0; }
+  body { display:flex; align-items:center; justify-content:center; }
+  canvas { image-rendering:pixelated; display:block; }
+  #hud { position:fixed; top:8px; left:50%; transform:translateX(-50%);
+         font-size:13px; text-align:center; pointer-events:none; opacity:.85 }
+  #hud b { color:#ffd866 }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
