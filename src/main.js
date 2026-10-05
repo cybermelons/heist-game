@@ -10,6 +10,13 @@ const hud = document.getElementById('hud');
 const keys = new Set();
 let room, players, idx = 0, solvedAt = 0;
 
+// Physics constants are per-step, so the step has to be a fixed duration or the
+// game runs at the display's speed: double on a 120Hz panel, slow when a laptop
+// throttles. Simulate in fixed 1/60s steps and draw whatever the frame lands on.
+const STEP = 1000 / 60, MAX_CATCHUP = 5;
+let acc = 0, prev = 0;
+let hudText = '';
+
 addEventListener('keydown', e => {
   keys.add(e.code);
   if (e.code === 'KeyR') loadRoom(idx);
@@ -31,6 +38,7 @@ function loadRoom(i) {
   players = room.def.spawn.map((s, n) => new Player(s.x, s.y, MAPS[n]));
   for (const p of players) p.reset(room);
   solvedAt = 0;
+  acc = 0; prev = 0;
   resize();
 }
 
@@ -46,11 +54,21 @@ function resize() {
 }
 addEventListener('resize', resize);
 
-function frame() {
+function frame(now) {
+  // The first call comes from bootstrap, not rAF, so there is no timestamp.
+  if (now === undefined) now = performance.now();
   if (room) {
-    for (const p of players) p.update(room, keys);
-    if (room.check(players) && !solvedAt) solvedAt = performance.now();
-    if (solvedAt && performance.now() - solvedAt > 1200 && idx < ROOMS.length - 1) loadRoom(idx + 1);
+    if (!prev) prev = now;
+    // Clamp the catch-up: a backgrounded tab returns with a huge delta, and
+    // simulating all of it at once teleports players through walls.
+    acc = Math.min(acc + (now - prev), STEP * MAX_CATCHUP);
+    prev = now;
+
+    for (; acc >= STEP; acc -= STEP) {
+      for (const p of players) p.update(room, keys);
+      if (room.check(players) && !solvedAt) solvedAt = now;
+    }
+    if (solvedAt && now - solvedAt > 1200 && idx < ROOMS.length - 1) loadRoom(idx + 1);
 
     ctx.fillStyle = '#242430';
     ctx.fillRect(0, 0, cv.width, cv.height);
@@ -66,9 +84,12 @@ function frame() {
       ctx.fillText('ROOM CLEAR', cv.width / 2, cv.height / 2 + 3);
       ctx.textAlign = 'left';
     }
-    hud.innerHTML = `<b>${room.title}</b> &nbsp; ` +
+    // Only touch the DOM when the text actually changes. Rewriting innerHTML
+    // every frame was 60 parses a second for a string that changes on a keypress.
+    const t = `<b>${room.title}</b> &nbsp; ` +
       players.map((p, i) => `P${i + 1}:${TOOLS[p.tool]}`).join(' &nbsp; ') +
       ` &nbsp; <span style="opacity:.55">R=reset &nbsp; P1 WASD+Shift+1234 &nbsp; P2 arrows+/+numpad</span>`;
+    if (t !== hudText) { hud.innerHTML = t; hudText = t; }
   }
   requestAnimationFrame(frame);
 }
