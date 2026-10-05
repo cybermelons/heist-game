@@ -240,7 +240,9 @@ $('test').onclick = () => {
     id: 'draft', title: $('title').value || 'Draft',
     spawn, rows: rows(),
   }));
-  open('index.html?room=draft', '_blank');
+  // Same tab, not a popup: a new tab has no history, so there is nothing for
+  // the game's "back to editor" button or the browser Back to return to.
+  location.href = 'index.html?room=draft';
 };
 
 $('resize').onclick = () => {

@@ -11,9 +11,14 @@
   #hud { position:fixed; top:8px; left:50%; transform:translateX(-50%);
          font-size:13px; text-align:center; pointer-events:none; opacity:.85 }
   #hud b { color:#ffd866 }
+  #back { position:fixed; top:8px; left:10px; display:none; z-index:2;
+          background:#2c2c38; color:#e8e8f0; border:1px solid #34343f; border-radius:4px;
+          padding:5px 9px; font:12px ui-monospace,monospace; cursor:pointer }
+  #back:hover { border-color:#ffd866 }
 </style>
 </head>
 <body>
+<button id="back" title="Esc">‹ back to editor</button>
 <canvas id="c"></canvas>
 <div id="hud"></div>
 <script type="module" src="src/main.js"></script>

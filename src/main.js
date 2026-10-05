@@ -102,6 +102,15 @@ load().then(() => {
           return st.got;
         },
       });
+      // Testing a draft is a round trip: offer the way back, by button or Esc.
+      const back = document.getElementById('back');
+      const toEditor = () => {
+        if (history.length > 1) history.back();   // keeps the editor's scroll/brush
+        else location.href = 'edit.html';
+      };
+      if (back) { back.style.display = 'block'; back.onclick = toEditor; }
+      addEventListener('keydown', e => { if (e.code === 'Escape') toEditor(); });
+
       loadRoom(ROOMS.length - 1); frame(); return;
     }
   }
