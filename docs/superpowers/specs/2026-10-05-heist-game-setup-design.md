@@ -19,11 +19,12 @@ proving the contract survives real use.
 
 | Decision | Value |
 |---|---|
-| Engine | Godot 4 |
+| Stack | HTML5 + vanilla JS, canvas 2D, no framework |
 | Coop | Local same-screen, shared camera, no netcode |
 | Coop depth | Mostly independent; either player can solve most things |
 | Tool roster | Fixed, all 4 available from room 1 |
 | Art | Kenney All-in-1 (CC0) placeholders; licensed art bought later |
+| Room format | Plain-text JS data module per room |
 | Parallelism | One reference room first, then fan out |
 
 ### Explicitly out of scope
@@ -78,98 +79,114 @@ Measured geometry (verified with `identify`, not assumed):
 ### The art-swap rule
 
 Buying art later is cheap **only** if no room references a texture directly.
-Every room draws its geometry from one shared `TileSet` resource at
-`assets/tilesets/heist.tres`. Swapping art becomes an edit to that one resource
-instead of an edit to N rooms. A room that loads a PNG itself is a contract
-violation, because it silently makes the future art purchase expensive.
+All atlas paths and tile-index lookups live in one module, `src/atlas.js`, which
+exposes tiles by **name** (`"crate"`, `"vault_door"`), never by index. Swapping
+art becomes an edit to that one file instead of an edit to N rooms. A room that
+names a PNG, or hardcodes a numeric tile index, is a contract violation: it
+silently makes the future art purchase expensive, and it is also unreadable in
+review.
+
+This matters more in HTML than it would in an engine, because there is no editor
+to abstract the atlas for us — the indirection has to be deliberate.
 
 ## Architecture
 
-The shape is deliberately flat. Rooms are the unit of work, and the only shared
-code is what rooms genuinely cannot each own.
+Vanilla JS with ES modules, served as static files. No framework, no bundler, no
+build step — a browser loads `index.html` and runs. This is a deliberate choice,
+not laziness about tooling: a room author edits one file and refreshes, and there
+is no build to break between parallel contributors.
 
 ```
 heist-game/
-  project.godot
-  assets/
-    kenney/                  # vendored, CC0, unmodified
-    tilesets/heist.tres      # the single shared TileSet
+  index.html
+  assets/kenney/              # vendored, CC0, unmodified
   src/
-    autoload/
-      game.gd                # run state, current room, tool unlock flags
-      room_service.gd        # loads/unloads rooms, owns transitions
-    player/
-      player.gd              # movement, tool use, interaction probe
-      player.tscn
-    tools/
-      tool.gd                # base class: one virtual `use()`
-      rod.gd  hoe.gd  can.gd  axe.gd
-    room/
-      room.gd                # base class every room extends
-      interactable.gd        # base class for things a tool acts on
+    main.js                   # boot, canvas, fixed-timestep loop
+    atlas.js                  # the ONLY file naming PNGs or tile indices
+    input.js                  # two-player keyboard mapping
+    player.js                 # movement, tool use, interaction probe
+    tools.js                  # the four tools
+    room.js                   # room loading, the Room shape, reset()
+    interactable.js           # base behaviour for tool-affected objects
   rooms/
-    r00_reference/           # the hand-built proof
-      room.tscn  room.gd
-    r01_.../ r02_.../        # fanned out in parallel
+    r00_reference.js          # the hand-built proof
+    r01_....js                # fanned out in parallel
+    index.js                  # the ordered room list — the ONLY place order lives
   tests/
+    run.mjs                   # headless Playwright runner
 ```
+
+### Why rooms are data, not scenes
+
+Each room is a plain JS module exporting a data object. That makes a room a
+**reviewable text file**: a diff shows what changed, two authors never conflict
+in a binary, and I can assert against a room's contents in a test without
+launching it. This is the main thing HTML buys us over an engine's binary scene
+files, and it is what makes parallel authorship by separate agents practical.
 
 ### Data flow
 
-`room_service` is the only thing that knows the room order. A room never names
-another room — not the next one, not the previous one. It reports that it is
-finished and `room_service` decides what that means. This is what lets rooms be
-written in any order by authors who have never read each other's code.
+`rooms/index.js` is the only thing that knows the room order. A room never names
+another room — not the next, not the previous. It reports completion and the
+runner decides what that means. This is what lets rooms be written in any order
+by authors who have not read each other's code.
 
 ```
-player --(use tool)--> interactable --(satisfied)--> room
-room --emit solved--> room_service --> loads next room from its ordered list
+input -> player --(use tool)--> interactable --(satisfied)--> room.check()
+room solved -> main.js advances to the next entry in rooms/index.js
 ```
+
+### Coordinates
+
+The world grid is **16px**. Kenney tiles are 18x18 (16x16 of art plus a 1px
+bleed margin), so the renderer samples a 16x16 source region at an 18px stride
+and draws it to a 16px destination. The margin is atlas padding and never world
+space. `ctx.imageSmoothingEnabled = false`, and the canvas scales by an integer
+factor only — a fractional scale is what makes pixel art shimmer.
 
 ## The room contract
 
 This is the real deliverable. Every parallel author codes against exactly this.
 
-```gdscript
-class_name Room extends Node2D
-
-signal solved                 # emitted exactly once, when the room is complete
-
-@export var room_title: String        # shown on entry
-@export var spawn_p1: Marker2D        # where player 1 enters
-@export var spawn_p2: Marker2D        # where player 2 enters
-
-func reset() -> void          # restore to initial state; must be idempotent
+```js
+export default {
+  id: "r00_reference",
+  title: "The Loading Dock",        // shown on entry
+  spawn: [{x: 2, y: 8}, {x: 4, y: 8}],  // p1, p2, in TILE coords
+  tiles: [...],                     // row-major tile NAMES, not indices
+  objects: [...],                   // interactables, by tile coord
+  check(state) { return bool },     // true once the room is complete
+  reset() {}                        // restore initial state; idempotent
+}
 ```
 
-Rules, each with the failure it prevents:
+Rules, each paired with the failure it prevents:
 
 1. **A room may assume all four tools are available.** The roster is fixed, so
    there is no ordering dependency to reason about. This is the single rule that
    makes parallel authorship possible.
-2. **A room emits `solved` exactly once and never loads another room.** A room
-   that loads its successor hardcodes the running order and breaks reordering.
-3. **A room owns everything inside its own directory and writes nothing outside
-   it.** No shared mutable globals, so two rooms cannot collide.
-4. **A room reads no state from previous rooms.** Linear *narrative*, independent
-   *mechanics*. A room that reads prior state cannot be tested alone.
-5. **A room must be playable when launched directly** via
-   `godot --path . rooms/rNN_x/room.tscn`. If it only works in sequence, it
-   cannot be developed or reviewed in parallel.
-6. **A room draws tiles only from `assets/tilesets/heist.tres`.** Protects the
-   later art purchase.
+2. **A room signals completion only through `check()`, and never advances the
+   game.** A room that loads its successor hardcodes the running order and
+   breaks reordering.
+3. **A room writes nothing outside its own module.** No shared mutable globals,
+   so two rooms cannot collide.
+4. **A room reads no state from previous rooms.** Linear *narrative*,
+   independent *mechanics*. A room that reads prior state cannot be tested alone.
+5. **A room must be playable standalone** at `index.html?room=rNN_x`. If it only
+   works in sequence, it cannot be developed or reviewed in parallel.
+6. **A room names tiles, never PNGs and never numeric indices.** Protects the
+   later art purchase and keeps the room readable in review.
 7. **`reset()` must fully restore initial state.** Players will fail puzzles and
-   retry; a partial reset produces an unsolvable room and a confusing bug report.
+   retry; a partial reset yields an unsolvable room and a confusing bug report.
 8. **Both players must be able to complete the room.** Given mostly-independent
    coop, no puzzle may be solvable by only one of the two bodies, or a player can
-   be stranded. A room author who *wants* a two-player gate may add one locally —
-   this raises coop depth per room without touching any other room or this
-   contract.
+   be stranded. An author who *wants* a two-player gate may add one locally —
+   raising coop depth per room without touching any other room or this contract.
 
 ## Tools
 
 Four tools, fixed, each a farming implement reread as a heist implement. Each is
-one subclass with one `use()` override, which keeps the shared surface tiny.
+one function with the same signature, keeping the shared surface tiny.
 
 | Tool | Farming origin | Heist function |
 |---|---|---|
@@ -178,38 +195,54 @@ one subclass with one `use()` override, which keeps the shared surface tiny.
 | Can | watering can | douse sensors/electrics; grow a vine to climb |
 | Axe | chopping wood | cut ropes, beams, barriers |
 
-`Interactable` exposes which tools affect it, so adding a puzzle object never
+An interactable declares which tools affect it, so adding a puzzle object never
 requires editing a tool. Tools stay closed; puzzle objects stay open.
+
+## Input
+
+Two players on one keyboard, mapped in `input.js`:
+
+- P1: `WASD` + `Shift` use + `1234` select tool
+- P2: arrows + `/` use + numpad `1234` select tool
+
+Gamepads are **not** in this phase. The browser Gamepad API needs a button press
+before a pad registers and behaves inconsistently across browsers — real work,
+and not on the path to a testable room. Keyboard-only is also what makes the
+headless tests possible, since synthetic key events drive the game directly.
 
 ## Testing
 
-Each room ships one headless test asserting that driving its intended solution
-emits `solved`, and that `reset()` returns it to its initial state. This is the
-smallest check that fails if a room breaks, and it is runnable per-room, which
-matters when rooms land in parallel from different authors.
+This is where HTML earns its place over an engine. Each room ships one headless
+Playwright test that loads the room standalone, drives its intended solution with
+synthetic key events, and asserts `check()` goes true — plus that `reset()`
+restores the initial state. Each test also saves a screenshot, so a room can be
+reviewed by looking at it rather than by reading its tile array.
 
 ```
-godot --headless --path . tests/run.tscn
+pnpm test              # all rooms, headless
+pnpm test r00          # one room
 ```
 
-The reference room's test is written first and doubles as the worked example
-every room author copies.
+Chromium is already present at `~/.cache/ms-playwright`; `/usr/bin/google-chrome`
+and `/usr/bin/firefox` are available as fallbacks. The reference room's test is
+written first and is the worked example every room author copies.
 
 ## Build order
 
-1. Godot 4 install on botan (not currently present — `godot` is not on PATH).
-2. Project skeleton, Kenney assets vendored, `heist.tres` built.
-3. Player: movement, two-controller local input, tool use, interaction probe.
+1. `index.html`, canvas, fixed-timestep loop, integer scaling.
+2. Kenney assets vendored; `atlas.js` with named tile lookups.
+3. Player: movement, two-player keyboard input, tool use, interaction probe.
 4. The four tools.
-5. `room.gd`, `interactable.gd`, `room_service.gd`.
-6. **`r00_reference` — hand-built, by one author, start to finish.**
-7. Validate the contract against that room, and fix the contract where reality
+5. `room.js`, `interactable.js`, `rooms/index.js`.
+6. Playwright harness and the screenshot convention.
+7. **`r00_reference` — hand-built, by one author, start to finish.**
+8. Validate the contract against that room; fix the contract where reality
    disagreed with it.
-8. Only then fan out rooms in parallel.
+9. Only then fan out rooms in parallel.
 
-Step 7 is the point of step 6. The contract above is a hypothesis; a single real
-room is what converts it into something other authors can trust. Fanning out
-before that multiplies any contract mistake by the number of rooms.
+Step 8 is the point of step 7. The contract above is a hypothesis; a single real
+room converts it into something other authors can trust. Fanning out before that
+multiplies any contract mistake by the number of rooms.
 
 ## Risks
 
@@ -222,3 +255,9 @@ before that multiplies any contract mistake by the number of rooms.
   and the tileset rule keeps it to one file.
 - **18px tile vs 16px grid confusion** produces seams or misalignment. Pinned
   explicitly above because it is the kind of mistake every author makes once.
+- **No engine means we write our own collision and camera.** Accepted: a
+  tile-grid platformer's collision is well-understood and small. The risk is
+  scope creep in `player.js`, so it stays limited to axis-separated AABB-vs-tile
+  movement and nothing more general.
+- **Browser gamepad support is deferred**, so "couch coop" is two players on one
+  keyboard for now. Adequate for testing the premise; revisit before any release.
