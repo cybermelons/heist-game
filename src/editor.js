@@ -122,7 +122,7 @@ const SAVE = 'heist_editor_wip';
 function save() {
   try {
     localStorage.setItem(SAVE, JSON.stringify({
-      v: 1, W, H, spawn, title: $('title').value, grid, at: Date.now(),
+      v: 1, W, H, spawn, title: $('title').value, grid, current, at: Date.now(),
     }));
     const t = new Date().toLocaleTimeString();
     $('saved').textContent = 'saved ' + t;
@@ -132,22 +132,113 @@ function save() {
   }
 }
 
-function loadWip() {
-  let w;
-  try { w = JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch { return false; }
-  if (!w || w.v !== 1 || !Array.isArray(w.grid) || !w.grid.length) return false;
+// A room read from storage is untrusted: it may predate a legend change, or
+// have been hand-edited. Validate before it reaches the grid.
+function apply(w) {
+  if (!w || !Array.isArray(w.grid) || !w.grid.length || !Array.isArray(w.grid[0])) return false;
   // Trust the stored dimensions only as far as the stored rows actually go.
   H = w.grid.length; W = w.grid[0].length;
-  grid = w.grid.map(r => r.slice());
+  grid = w.grid.map(r => {
+    const row = r.slice(0, W);
+    while (row.length < W) row.push('.');       // ragged rows would break indexing
+    // Unknown tile names would draw magenta forever; drop them to empty.
+    return row.map(t => (t in NAMES ? t : '.'));
+  });
   spawn = (w.spawn || []).slice(0, 2).map(s => ({ x: s.x | 0, y: s.y | 0 }));
   while (spawn.length < 2) spawn.push({ x: 2, y: H - 4 });
-  spawn = spawn.map(s => ({ x: Math.min(Math.max(s.x, 0), W - 1), y: Math.min(Math.max(s.y, 0), H - 1) }));
-  // Unknown tile names would draw magenta forever; drop them to empty.
-  for (const row of grid)
-    for (let x = 0; x < row.length; x++) if (!(row[x] in NAMES)) row[x] = '.';
+  spawn = spawn.map(s => ({ x: Math.min(Math.max(s.x, 0), W - 1),
+                           y: Math.min(Math.max(s.y, 0), H - 1) }));
   $('title').value = w.title || 'New Room';
   $('w').value = W; $('h').value = H;
   return true;
+}
+
+function loadWip() {
+  let w;
+  try { w = JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch { return false; }
+  if (!w || w.v !== 1 || !apply(w)) return false;
+  current = typeof w.current === 'string' ? w.current : '';
+  return true;
+}
+
+// Room library. Named rooms, many of them, in localStorage. Separate from the
+// work-in-progress autosave: that is the current desk, this is the shelf.
+const LIB = 'heist_editor_lib';
+
+function lib() {
+  try { const l = JSON.parse(localStorage.getItem(LIB) || '{}'); return l && typeof l === 'object' ? l : {}; }
+  catch { return {}; }
+}
+function libWrite(l) {
+  try { localStorage.setItem(LIB, JSON.stringify(l)); return true; }
+  catch (e) { $('saved').textContent = 'LIBRARY NOT SAVED: ' + e.name; return false; }
+}
+
+function slug(name) { return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'room'; }
+
+function refreshLib() {
+  const l = lib(), names = Object.keys(l).sort();
+  const sel = $('lib');
+  sel.innerHTML = '<option value="">— library —</option>' +
+    names.map(k => `<option value="${k}">${l[k].title || k}</option>`).join('');
+  sel.value = current;
+  $('libdel').disabled = !current || !(current in l);
+  $('status').textContent = `${names.length} saved`;
+}
+
+let current = '';   // library key the editor is currently editing, '' = unsaved
+
+// True when the room on screen differs from its saved library copy, so the
+// picker can warn before replacing it. Undo covers a mistake, but only if you
+// notice in time.
+function dirty() {
+  if (!current) return grid.some(r => r.some(t => t !== '.'));
+  const w = lib()[current];
+  if (!w) return true;
+  return JSON.stringify({ g: grid, s: spawn, t: $('title').value }) !==
+         JSON.stringify({ g: w.grid, s: w.spawn, t: w.title });
+}
+
+function saveToLib(askName) {
+  const l = lib();
+  let key = current;
+  if (askName || !key) {
+    const proposed = slug($('title').value);
+    const name = prompt('Save room as:', proposed);
+    if (name === null) return;
+    key = slug(name);
+    if (key in l && !confirm(`"${key}" exists. Overwrite?`)) return;
+  }
+  l[key] = { v: 1, title: $('title').value.trim() || key, spawn, grid, at: Date.now() };
+  if (!libWrite(l)) return;
+  current = key;
+  refreshLib();
+  $('saved').textContent = `saved to library: ${key}`;
+}
+
+function loadFromLib(key) {
+  if (!key) { $('lib').value = current; return; }
+  if (key === current) return;
+  if (dirty() && !confirm('The room on screen has unsaved changes. Load anyway?')) {
+    $('lib').value = current;   // put the picker back, nothing was loaded
+    return;
+  }
+  const w = lib()[key];
+  if (!w) { refreshLib(); return; }   // vanished (another tab deleted it)
+  push();                       // loading is undoable, like any other edit
+  if (!apply(w)) { alert(`"${key}" could not be read and was left alone.`); return; }
+  current = key;
+  resize(); render(); save(); refreshLib();
+}
+
+function deleteFromLib() {
+  const l = lib();
+  if (!current || !(current in l)) return;
+  if (!confirm(`Delete "${current}" from the library? The room on screen stays.`)) return;
+  delete l[current];
+  libWrite(l);
+  current = '';
+  refreshLib();
 }
 
 function undo() { if (!undos.length) return; redos.push(snap()); restore(undos.pop()); mark(); save(); }
@@ -266,8 +357,12 @@ addEventListener('keydown', e => {
 $('title').addEventListener('input', save);
 $('reset').onclick = () => {
   if (!confirm('Discard the saved work in progress and start a fresh room?')) return;
-  push(); localStorage.removeItem(SAVE); fresh(); render(); save();
+  push(); localStorage.removeItem(SAVE); current = ''; fresh(); render(); save(); refreshLib();
 };
+$('lib').onchange = e => loadFromLib(e.target.value);
+$('libsave').onclick = () => saveToLib(false);
+$('libsaveas').onclick = () => saveToLib(true);
+$('libdel').onclick = deleteFromLib;
 $('undo').onclick = undo;
 $('redo').onclick = redo;
 
@@ -278,6 +373,5 @@ load().then(() => {
   OBJECT.forEach(n => swatch(n, $('pal_object')));
   ['P1', 'P2'].forEach(n => swatch(n, $('pal_spawn')));
   if (!loadWip()) fresh();
-  resize(); render(); mark(); save();
-  $('status').textContent = `${Object.keys(NAMES).length - 1} tiles`;
+  resize(); render(); mark(); save(); refreshLib();
 });

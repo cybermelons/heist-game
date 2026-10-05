@@ -23,6 +23,7 @@
   .sw.on { border-color:var(--hi); background:#3a3a30 }
   .sw canvas { width:28px; height:28px; background:none }
   .sw span { position:absolute; bottom:0; right:2px; font-size:8px; opacity:.5 }
+  select { max-width:150px }
   button, select, input { background:#2c2c38; color:var(--ink); border:1px solid var(--line);
            border-radius:4px; padding:5px 9px; font:12px ui-monospace,monospace; cursor:pointer }
   button:hover { border-color:var(--hi) }
@@ -55,6 +56,10 @@
       <button id="undo" title="ctrl/cmd+Z">undo</button>
       <button id="redo" title="ctrl/cmd+shift+Z">redo</button>
       <button id="test">▶ test</button>
+      <select id="lib" title="load a saved room"></select>
+      <button id="libsave" title="save to library">save</button>
+      <button id="libsaveas">save as…</button>
+      <button id="libdel">delete</button>
       <button id="export">export .js</button>
       <button id="reset">new</button>
       <span class="hint" id="saved"></span>
