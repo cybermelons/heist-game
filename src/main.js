@@ -3,6 +3,7 @@ import { Room } from './room.js';
 import { Player, MAPS, TOOLS } from './player.js';
 import { tools, drawEffects } from './tools.js';
 import { ROOMS } from '../rooms/index.js';
+import { parse } from './room.js';
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const hud = document.getElementById('hud');
@@ -85,6 +86,26 @@ window.__players = () => players;
 
 load().then(() => {
   const want = new URLSearchParams(location.search).get('room');
+
+  // ?room=draft plays the editor's unsaved room straight from localStorage.
+  if (want === 'draft') {
+    const d = JSON.parse(localStorage.getItem('heist_draft') || 'null');
+    if (d) {
+      ROOMS.push({
+        id: 'draft', title: d.title, spawn: d.spawn, tiles: parse(d.rows),
+        reset(st) { st.got = false; },
+        check(st, room, players) {
+          for (const p of players) {
+            const tx = Math.floor((p.x + p.w / 2) / 16), ty = Math.floor((p.y + p.h / 2) / 16);
+            if (room.at(tx, ty) === 'gem') { room.set(tx, ty, '.'); st.got = true; }
+          }
+          return st.got;
+        },
+      });
+      loadRoom(ROOMS.length - 1); frame(); return;
+    }
+  }
+
   const found = ROOMS.findIndex(r => r.id.startsWith(want || ''));
   loadRoom(want && found >= 0 ? found : 0);
   frame();

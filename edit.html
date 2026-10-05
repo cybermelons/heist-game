@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heist — level editor</title>
+<style>
+  :root { --bg:#1a1a22; --panel:#23232e; --line:#34343f; --ink:#e8e8f0; --hi:#ffd866; }
+  * { box-sizing:border-box }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+              font:13px ui-monospace,monospace; overflow:hidden }
+  #wrap { display:flex; height:100% }
+  #left { width:210px; background:var(--panel); border-right:1px solid var(--line);
+          padding:10px; overflow-y:auto; flex:none }
+  #main { flex:1; display:flex; flex-direction:column; min-width:0 }
+  #bar { padding:8px 10px; background:var(--panel); border-bottom:1px solid var(--line);
+         display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  #stage { flex:1; overflow:auto; display:flex; align-items:center; justify-content:center; padding:16px }
+  canvas { image-rendering:pixelated; background:#242430; cursor:crosshair }
+  h3 { margin:4px 0 8px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; opacity:.55 }
+  .pal { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-bottom:12px }
+  .sw { aspect-ratio:1; background:#2c2c38; border:1px solid transparent; border-radius:3px;
+        cursor:pointer; display:flex; align-items:center; justify-content:center; position:relative }
+  .sw.on { border-color:var(--hi); background:#3a3a30 }
+  .sw canvas { width:28px; height:28px; background:none }
+  .sw span { position:absolute; bottom:0; right:2px; font-size:8px; opacity:.5 }
+  button, select, input { background:#2c2c38; color:var(--ink); border:1px solid var(--line);
+           border-radius:4px; padding:5px 9px; font:12px ui-monospace,monospace; cursor:pointer }
+  button:hover { border-color:var(--hi) }
+  input[type=number] { width:56px; cursor:text }
+  input[type=text] { cursor:text }
+  #out { position:fixed; inset:5% 10%; background:#14141b; border:1px solid var(--hi);
+         border-radius:6px; padding:14px; display:none; flex-direction:column; z-index:9 }
+  #out textarea { flex:1; width:100%; background:#0f0f15; color:#cfe; border:1px solid var(--line);
+         border-radius:4px; padding:10px; font:12px ui-monospace,monospace; resize:none }
+  .hint { opacity:.5; font-size:11px; line-height:1.5 }
+  .row { display:flex; gap:6px; align-items:center; margin-bottom:6px }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="left">
+    <h3>Terrain</h3><div class="pal" id="pal_terrain"></div>
+    <h3>Objects</h3><div class="pal" id="pal_object"></div>
+    <h3>Spawns</h3><div class="pal" id="pal_spawn"></div>
+    <p class="hint">Click/drag paints.<br>Right-click erases.<br>Spawn tools place P1/P2.</p>
+  </div>
+  <div id="main">
+    <div id="bar">
+      <input type="text" id="title" value="New Room" size="16">
+      <label>w<input type="number" id="w" value="30" min="8" max="80"></label>
+      <label>h<input type="number" id="h" value="12" min="6" max="40"></label>
+      <button id="resize">apply</button>
+      <button id="clear">clear</button>
+      <button id="test">▶ test</button>
+      <button id="export">export .js</button>
+      <span class="hint" id="status"></span>
+    </div>
+    <div id="stage"><canvas id="c"></canvas></div>
+  </div>
+</div>
+<div id="out">
+  <div class="row">
+    <b style="flex:1">Save as <code>rooms/&lt;id&gt;.js</code>, then add it to <code>rooms/index.js</code></b>
+    <button id="copy">copy</button><button id="close">close</button>
+  </div>
+  <textarea id="code" spellcheck="false"></textarea>
+</div>
+<script type="module" src="src/editor.js"></script>
+</body>
+</html>
