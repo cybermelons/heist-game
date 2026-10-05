@@ -14,7 +14,7 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 
 let W = 30, H = 12, grid = [], spawn = [{ x: 2, y: 8 }, { x: 4, y: 8 }];
-let brush = 'dirt', painting = 0, scale = 2;
+let brush = 'dirt', painting = 0, scale = 2, hover = null;
 
 function blank() { grid = Array.from({ length: H }, () => Array(W).fill('.')); }
 
@@ -76,6 +76,32 @@ function render() {
     ctx.fillStyle = '#14141b'; ctx.font = '7px ui-monospace,monospace';
     ctx.fillText('P' + (i + 1), s.x * TILE + 3, s.y * TILE + 11);
   });
+
+  // Ghost the brush under the cursor, so a click's effect is visible before it
+  // happens. Drawn before the spawn warning so the red outline stays on top.
+  if (hover && hover.x >= 0 && hover.y >= 0 && hover.x < W && hover.y < H) {
+    const hx = hover.x * TILE, hy = hover.y * TILE;
+    // A wash behind the ghost. Sparse tiles (tree, key, lever) cover only a few
+    // pixels, so the ghost alone is near invisible on the dark grid.
+    if (!hover.erase) {
+      ctx.fillStyle = 'rgba(255,216,102,.16)';
+      ctx.fillRect(hx, hy, TILE, TILE);
+    }
+    ctx.globalAlpha = 0.6;
+    if (hover.erase) {
+      ctx.fillStyle = '#1a1a22';
+      ctx.fillRect(hx, hy, TILE, TILE);
+    } else if (brush === 'P1' || brush === 'P2') {
+      ctx.fillStyle = brush === 'P1' ? '#7ee787' : '#ff9ec4';
+      ctx.fillRect(hx + 3, hy + 2, 10, 12);
+    } else {
+      draw(ctx, brush, hx, hy);
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = hover.erase ? '#ff5f6d' : '#ffd866';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(hx + .5, hy + .5, TILE - 1, TILE - 1);
+  }
 
   // Warn where a spawn is buried — the bug that froze the first room.
   spawn.forEach((s, i) => {
@@ -267,6 +293,7 @@ function paint(ev, erase) {
     }
   } else put(x, y, erase);
   last = { x, y };
+  hover = { x, y, erase };
   render();
 }
 
@@ -277,7 +304,15 @@ cv.addEventListener('mousedown', e => {
   paint(e, e.button === 2);
 });
 addEventListener('mouseup', () => { if (painting) { painting = 0; last = null; save(); } });
-cv.addEventListener('mousemove', e => { if (painting) paint(e, painting === 2); });
+cv.addEventListener('mousemove', e => {
+  if (painting) { paint(e, painting === 2); return; }   // paint() renders already
+  const { x, y } = cell(e);
+  // Only redraw when the cursor crosses into a different tile.
+  if (hover && hover.x === x && hover.y === y) return;
+  hover = { x, y, erase: false };
+  render();
+});
+cv.addEventListener('mouseleave', () => { hover = null; render(); });
 
 function rows() {
   return grid.map(r => {
