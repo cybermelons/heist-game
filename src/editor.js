@@ -18,6 +18,17 @@ let brush = 'dirt', painting = 0, scale = 2;
 
 function blank() { grid = Array.from({ length: H }, () => Array(W).fill('.')); }
 
+// Starter room: a floor, so the first click has something to build against.
+function fresh() {
+  W = 30; H = 12;
+  $('w').value = W; $('h').value = H;
+  $('title').value = 'New Room';
+  blank();
+  for (let x = 0; x < W; x++) { grid[H - 1][x] = 'dirt'; grid[H - 2][x] = 'dirt'; grid[H - 3][x] = 'dirt_top'; }
+  spawn = [{ x: 2, y: H - 4 }, { x: 4, y: H - 4 }];
+  resize();
+}
+
 function swatch(name, host) {
   const d = document.createElement('div');
   d.className = 'sw' + (name === brush ? ' on' : '');
@@ -84,6 +95,64 @@ function cell(ev) {
 }
 let last = null;
 
+// Undo stack. A whole stroke is one step: snapshot on mousedown, not per cell,
+// so one ctrl+z undoes a drag instead of unwinding it tile by tile.
+const undos = [], redos = [], LIMIT = 60;
+
+function snap() { return { grid: grid.map(r => r.slice()), spawn: spawn.map(s => ({ ...s })), W, H }; }
+function restore(s) {
+  grid = s.grid.map(r => r.slice());
+  spawn = s.spawn.map(p => ({ ...p }));
+  W = s.W; H = s.H;
+  $('w').value = W; $('h').value = H;
+  resize(); render();
+}
+function push() {
+  undos.push(snap());
+  if (undos.length > LIMIT) undos.shift();
+  redos.length = 0;            // a new edit abandons the redo branch
+  mark();
+}
+function mark() { $('undo').disabled = !undos.length; $('redo').disabled = !redos.length; }
+
+// Autosave. A browser tool loses everything to a stray reload otherwise, so
+// the work in progress lives in localStorage and is restored on load.
+const SAVE = 'heist_editor_wip';
+
+function save() {
+  try {
+    localStorage.setItem(SAVE, JSON.stringify({
+      v: 1, W, H, spawn, title: $('title').value, grid, at: Date.now(),
+    }));
+    const t = new Date().toLocaleTimeString();
+    $('saved').textContent = 'saved ' + t;
+  } catch (e) {
+    // Quota or a disabled store: say so rather than pretending work is safe.
+    $('saved').textContent = 'NOT SAVED: ' + e.name;
+  }
+}
+
+function loadWip() {
+  let w;
+  try { w = JSON.parse(localStorage.getItem(SAVE) || 'null'); } catch { return false; }
+  if (!w || w.v !== 1 || !Array.isArray(w.grid) || !w.grid.length) return false;
+  // Trust the stored dimensions only as far as the stored rows actually go.
+  H = w.grid.length; W = w.grid[0].length;
+  grid = w.grid.map(r => r.slice());
+  spawn = (w.spawn || []).slice(0, 2).map(s => ({ x: s.x | 0, y: s.y | 0 }));
+  while (spawn.length < 2) spawn.push({ x: 2, y: H - 4 });
+  spawn = spawn.map(s => ({ x: Math.min(Math.max(s.x, 0), W - 1), y: Math.min(Math.max(s.y, 0), H - 1) }));
+  // Unknown tile names would draw magenta forever; drop them to empty.
+  for (const row of grid)
+    for (let x = 0; x < row.length; x++) if (!(row[x] in NAMES)) row[x] = '.';
+  $('title').value = w.title || 'New Room';
+  $('w').value = W; $('h').value = H;
+  return true;
+}
+
+function undo() { if (!undos.length) return; redos.push(snap()); restore(undos.pop()); mark(); save(); }
+function redo() { if (!redos.length) return; undos.push(snap()); restore(redos.pop()); mark(); save(); }
+
 function put(x, y, erase) {
   if (x < 0 || y < 0 || x >= W || y >= H) return;
   if (brush === 'P1' || brush === 'P2') spawn[brush === 'P1' ? 0 : 1] = { x, y };
@@ -111,8 +180,12 @@ function paint(ev, erase) {
 }
 
 cv.addEventListener('contextmenu', e => e.preventDefault());
-cv.addEventListener('mousedown', e => { painting = e.button === 2 ? 2 : 1; paint(e, e.button === 2); });
-addEventListener('mouseup', () => { painting = 0; last = null; });
+cv.addEventListener('mousedown', e => {
+  push();
+  painting = e.button === 2 ? 2 : 1;
+  paint(e, e.button === 2);
+});
+addEventListener('mouseup', () => { if (painting) { painting = 0; last = null; save(); } });
 cv.addEventListener('mousemove', e => { if (painting) paint(e, painting === 2); });
 
 function rows() {
@@ -172,24 +245,37 @@ $('test').onclick = () => {
 
 $('resize').onclick = () => {
   const nw = +$('w').value, nh = +$('h').value;
+  if (nw === W && nh === H) return;
+  push();
   const old = grid;
   W = nw; H = nh; blank();
   for (let y = 0; y < Math.min(nh, old.length); y++)
     for (let x = 0; x < Math.min(nw, old[y].length); x++) grid[y][x] = old[y][x];
   spawn = spawn.map(s => ({ x: Math.min(s.x, W - 1), y: Math.min(s.y, H - 1) }));
-  resize(); render();
+  resize(); render(); save();
 };
-$('clear').onclick = () => { if (confirm('Clear the whole room?')) { blank(); render(); } };
+$('clear').onclick = () => { if (confirm('Clear the whole room?')) { push(); blank(); render(); save(); } };
+addEventListener('keydown', e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;   // typing a title, not editing
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+});
+$('title').addEventListener('input', save);
+$('reset').onclick = () => {
+  if (!confirm('Discard the saved work in progress and start a fresh room?')) return;
+  push(); localStorage.removeItem(SAVE); fresh(); render(); save();
+};
+$('undo').onclick = undo;
+$('redo').onclick = redo;
+
 addEventListener('resize', () => { resize(); render(); });
 
 load().then(() => {
   TERRAIN.forEach(n => swatch(n, $('pal_terrain')));
   OBJECT.forEach(n => swatch(n, $('pal_object')));
   ['P1', 'P2'].forEach(n => swatch(n, $('pal_spawn')));
-  blank();
-  // a floor to start from, so the first click has context
-  for (let x = 0; x < W; x++) { grid[H - 1][x] = 'dirt'; grid[H - 2][x] = 'dirt'; grid[H - 3][x] = 'dirt_top'; }
-  spawn = [{ x: 2, y: H - 4 }, { x: 4, y: H - 4 }];
-  resize(); render();
+  if (!loadWip()) fresh();
+  resize(); render(); mark(); save();
   $('status').textContent = `${Object.keys(NAMES).length - 1} tiles`;
 });

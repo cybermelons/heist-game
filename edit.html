@@ -26,6 +26,7 @@
   button, select, input { background:#2c2c38; color:var(--ink); border:1px solid var(--line);
            border-radius:4px; padding:5px 9px; font:12px ui-monospace,monospace; cursor:pointer }
   button:hover { border-color:var(--hi) }
+  button:disabled { opacity:.35; cursor:default; border-color:var(--line) }
   input[type=number] { width:56px; cursor:text }
   input[type=text] { cursor:text }
   #out { position:fixed; inset:5% 10%; background:#14141b; border:1px solid var(--hi);
@@ -42,7 +43,7 @@
     <h3>Terrain</h3><div class="pal" id="pal_terrain"></div>
     <h3>Objects</h3><div class="pal" id="pal_object"></div>
     <h3>Spawns</h3><div class="pal" id="pal_spawn"></div>
-    <p class="hint">Click/drag paints.<br>Right-click erases.<br>Spawn tools place P1/P2.</p>
+    <p class="hint">Click/drag paints.<br>Right-click erases.<br>Spawn tools place P1/P2.<br>Undo: ctrl/cmd+Z<br>Redo: add shift</p>
   </div>
   <div id="main">
     <div id="bar">
@@ -51,8 +52,12 @@
       <label>h<input type="number" id="h" value="12" min="6" max="40"></label>
       <button id="resize">apply</button>
       <button id="clear">clear</button>
+      <button id="undo" title="ctrl/cmd+Z">undo</button>
+      <button id="redo" title="ctrl/cmd+shift+Z">redo</button>
       <button id="test">▶ test</button>
       <button id="export">export .js</button>
+      <button id="reset">new</button>
+      <span class="hint" id="saved"></span>
       <span class="hint" id="status"></span>
     </div>
     <div id="stage"><canvas id="c"></canvas></div>
